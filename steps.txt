@@ -1,0 +1,48 @@
+Phase 1: Network & Security Foundation
+VPC Setup: Provision a VPC including Public and Private Subnets, Route Tables (RT), an Internet Gateway (IGW), and a NAT Gateway for private subnet egress.
+
+DNS Configuration: Enable DNS Hostnames and DNS Support within the VPC settings to ensure internal service resolution.
+
+Security Groups (SG): Define granular firewall rules for the following:
+
+ALB SG: Permits public HTTP/HTTPS traffic.
+
+EC2 SG: Permits traffic from the ALB and allows EFS mount (Port 2049).
+
+EFS SG: Permits inbound traffic on Port 2049 specifically from the EC2 SG.
+
+Storage: Create the EFS File System across the required availability zones.
+
+====================================================================================================================================
+
+Phase 2: Gold Image & Launch Configuration
+Bootstrap Instance: Launch a temporary EC2 instance in a public subnet to:
+
+Deploy the application environment.
+
+Mount the EFS and migrate application files to it.
+
+Validate the configuration.
+
+AMI Creation: Capture an Amazon Machine Image (AMI) from the bootstrap instance to serve as the "Gold Image," then terminate the temporary instance.
+
+Launch Template (LT): Create a Launch Template using the new AMI, ensuring it includes the correct Security Groups and User Data (to auto-mount EFS on boot).
+
+=====================================================================================================================================
+
+Phase 3: Scaling & Load Balancing
+Target Groups (TG): Provision two Target Groups (Port 80 and Port 8080) with no initial targets.
+
+Application Load Balancer (ALB): Deploy a public-facing ALB and associate it with both Target Groups.
+
+Auto Scaling Group (ASG): Create the ASG using the Launch Template. Deploy instances into the private subnets and attach the ASG to the defined Target Groups.
+
+Scaling Policies: Configure Dynamic Scaling (e.g., Target Tracking on CPU utilization) to handle fluctuating traffic loads.
+
+======================================================================================================================================
+Phase 4: Final Routing
+Traffic Rules: Audit all Security Groups to ensure the "Chain of Trust" is correct (e.g., EFS only accepts from EC2; EC2 only accepts from ALB).
+
+======================================================================================================================================
+
+Route 53: Create an Alias record in your Hosted Zone to point your domain name to the ALB DNS name.
