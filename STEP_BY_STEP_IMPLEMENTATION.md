@@ -145,10 +145,11 @@ sudo mkdir -p /var/www/html
 	sudo chown -R apache:apache /var/www/html
 	sudo chmod -R 755 /var/www/html
 	
-	
-	(Optional) Create a test file to confirm EFS is working:
-	
-	echo "EFS mount successful" | sudo tee /var/www/html/index.html  
+	Create a test file for the main application running on port 80 to verify that Amazon EFS is mounted correctly and Apache is serving content from shared storage:
+
+	```bash
+	echo "Main application is running successfully using Amazon EFS" | sudo tee /var/www/html/index.html
+
 
 
 #### Step 6: Make the EFS Mount Persistent Across Reboots
@@ -234,5 +235,26 @@ Create an **internet-facing Application Load Balancer**.
 ---
 
 ## 🔹 Phase 7: Route 53 and Load Testing
+
 ### Route 53 Configuration
-Use **Amazon Route 53** to map a custom domain to the ALB DNS name.
+
+Use **Amazon Route 53** to map a custom domain name to the **Application Load Balancer (ALB)** DNS name.  
+This domain is used to access the customer-facing application.
+
+- **Main Application**  
+  Access the application using the Route 53 domain on **port 80**:
+  http://<your-domain-name>:80
+
+- **Stress / Load Testing**  
+The load-testing application runs on **port 8080** and can be accessed directly using the ALB DNS name:
+http://<alb-dns-name>:8080
+After accessing this endpoint, load can be generated to increase CPU utilization and **validate Auto Scaling behavior**, including **automatic EC2 instance creation and scaling based on load**.
+
+
+This separation ensures that customer traffic is routed through the domain name, while internal load testing is performed directly against the ALB without exposing the testing endpoint publicly.
+
+
+
+  
+
+
