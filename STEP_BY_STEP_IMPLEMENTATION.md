@@ -131,4 +131,3 @@ Phase 7 → Route 53 & Load Testing
 
 Final Architecture Flow
 Route 53 → ALB (Public Subnets) → Target Groups → ASG (Private Subnets) → EC2 → EFS
-<img width="1480" height="5336" alt="image" src="https://github.com/user-attachments/assets/ad01ffe1-4357-4825-9452-e0fb2608370b" />
