@@ -1,133 +1,238 @@
+# Step-by-Step Implementation Guide  
+## Resilient and Scalable Web Application on AWS
 
-Implementation Guide
-Resilient and Scalable Web Application on AWS
-This guide explains how to build the project step by step, in the exact order it should be implemented. Each phase builds on the previous one and should be completed sequentially.
+This guide explains how to build the project **step by step**, in the exact order it should be implemented.  
+Each phase depends on the previous one and should be completed sequentially.
 
-Phase 1: Network Setup (VPC, Subnets, Routing)
-Start by creating a dedicated Virtual Private Cloud (VPC) to isolate all application resources.
-Create a VPC with the CIDR block 192.168.0.0/24. This CIDR range will later be divided into public and private subnets across multiple Availability Zones.
-Next, create an Internet Gateway (IGW) and attach it to the VPC. Attaching the IGW is mandatory for enabling internet connectivity for public subnets and internet-facing resources such as the Application Load Balancer.
-Select two Availability Zones to ensure high availability:
-	• ap-south-1A
-	• ap-south-1B
-Create public subnets in each Availability Zone:
-	• ap-south-1A → 192.168.0.0/26
-	• ap-south-1B → 192.168.0.64/26
+---
+
+## Phase 1: Network Setup (VPC, Subnets, Routing)
+
+Start by creating a dedicated **Virtual Private Cloud (VPC)** to isolate all application resources.
+
+- Create a VPC with CIDR block `192.168.0.0/24`.
+- Create an **Internet Gateway (IGW)** and attach it to the VPC.
+- Select two Availability Zones to ensure high availability:
+  - `ap-south-1A`
+  - `ap-south-1B`
+
+### Public Subnets
+Create public subnets to host internet-facing resources:
+
+- `ap-south-1A` → `192.168.0.0/26`
+- `ap-south-1B` → `192.168.0.64/26`
+
+### Private Subnets
 Create private subnets for backend resources:
-	• ap-south-1A → 192.168.0.128/26
-	• ap-south-1B → 192.168.0.192/26
-Create a public route table and add a default route:
-0.0.0.0/0 → Internet Gateway
-Associate this route table with both public subnets. This makes them internet-accessible.
-Create a NAT Gateway in the public subnet in ap-south-1A and assign it an Elastic IP. The NAT Gateway allows outbound internet access for private subnet resources.
-Create a private route table and add the route:
-0.0.0.0/0 → NAT Gateway
-Associate this route table with both private subnets.
-At this point:
-	• Public subnets have direct internet access
-	• Private subnets have outbound-only internet access via the NAT Gateway
 
-Phase 2: Security Group Design
+- `ap-south-1A` → `192.168.0.128/26`
+- `ap-south-1B` → `192.168.0.192/26`
+
+### Routing Configuration
+
+- Create a **public route table** and add the route:
+  - `0.0.0.0/0 → Internet Gateway`
+- Associate the public route table with both public subnets.
+- Create a **NAT Gateway** in the public subnet (`ap-south-1A`) and assign an Elastic IP.
+- Create a **private route table** and add the route:
+  - `0.0.0.0/0 → NAT Gateway`
+- Associate the private route table with both private subnets.
+
+At this stage:
+- Public subnets have direct internet access.
+- Private subnets have outbound-only internet access via the NAT Gateway.
+
+---
+
+## Phase 2: Security Group Design
+
 Create three security groups to enforce least-privilege access.
-Create an ALB Security Group:
-	• Allow inbound traffic on port 80 from anywhere (customer-facing)
-	• Allow inbound traffic on port 8080 only from internal or admin IPs
-	• Allow all outbound traffic
-Create an EC2 Security Group:
-	• Allow inbound traffic on ports 80 and 8080 only from the ALB Security Group
-	• Allow all outbound traffic
-Create an EFS Security Group:
-	• Allow inbound traffic on port 2049 (NFS) only from the EC2 Security Group
-	• No inbound access from the ALB
+
+### ALB Security Group
+- Allow inbound traffic on port **80** from anywhere (customer-facing).
+- Allow inbound traffic on port **8080** only from internal or admin IPs.
+- Allow all outbound traffic.
+
+### EC2 Security Group
+- Allow inbound traffic on ports **80** and **8080** only from the ALB Security Group.
+- Allow all outbound traffic.
+
+### EFS Security Group
+- Allow inbound traffic on port **2049 (NFS)** only from the EC2 Security Group.
+- No inbound access from the ALB.
+
 These security groups will be reused in later phases.
 
-Phase 3: Amazon EFS Setup
-Create an Amazon Elastic File System (EFS) as a regional file system so it can be accessed from both Availability Zones.
+---
+
+## Phase 3: Amazon EFS Setup
+
+Create an **Amazon Elastic File System (EFS)** as a **regional file system** so it can be accessed from both Availability Zones.
+
 While creating EFS:
-	• Select the same VPC
-	• Place mount targets in the private subnets
-	• Attach the EFS Security Group
-Before mounting EFS, ensure that DNS Hostnames are enabled in the VPC. This allows EC2 instances to connect to EFS using its DNS name.
-EFS will be used later to provide shared persistent storage across Auto Scaling instances.
+- Select the same VPC.
+- Create mount targets in the private subnets.
+- Attach the **EFS Security Group**.
 
-Phase 4: Base EC2 Instance Preparation and AMI Creation
-Launch a temporary EC2 instance manually. This instance is used only to prepare the base image.
-Launch the instance:
-	• In a private subnet
-	• Without a public IP
-	• Using the EC2 Security Group
-	• Internet access is provided via the NAT Gateway
-Inside this EC2 instance, update the OS and install Apache HTTP Server:
-sudo yum update -y
-sudo yum install httpd -y
-sudo systemctl enable httpd
-sudo systemctl start httpd
-sudo systemctl status httpd
-Next, install EFS utilities inside the instance:
-sudo yum install -y amazon-efs-utils
-Mount the EFS file system to the web root directory:
-sudo mount -t efs -o tls fs-xxxx:/ /var/www/html
-At this stage:
-	• Apache serves content from /var/www/html
-	• The directory is backed by EFS
-	• Content is shared across instances
-Make the mount persistent by adding it to /etc/fstab:
-fs-xxxx.efs.ap-south-1.amazonaws.com:/ /var/www/html efs defaults,_netdev 0 0
-Reboot the instance to verify:
-	• Apache starts successfully
-	• EFS mounts automatically
-Once verified, create an AMI from this instance.
-During AMI creation, the instance shuts down temporarily and EBS snapshots are taken.
-This AMI becomes the base image for Auto Scaling.
+Before mounting EFS, ensure that **DNS Hostnames are enabled** in the VPC.  
+This allows EC2 instances to connect to EFS using its DNS name.
 
-Phase 5: Launch Template and Auto Scaling Group
-Create a Launch Template using:
-	• The custom AMI
-	• EC2 Security Group
-	• User data (stress script if required)
-The application ports are:
-	• Port 80 → Main application
-	• Port 8080 → Stress/load testing
-Create an Auto Scaling Group (ASG) using this Launch Template.
-While creating the ASG:
-	• Select only private subnets
-	• Do not assign public IPs
-	• Configure desired, minimum, and maximum capacity
-	• Add CPU-based dynamic scaling policies
-The ASG will automatically launch and terminate EC2 instances as load changes.
+EFS will be used to provide shared persistent storage across Auto Scaling instances.
 
-Phase 6: Application Load Balancer and Target Groups
-Create two Target Groups before creating the Load Balancer:
-	• Target Group 1 → Port 80 (main application)
-	• Target Group 2 → Port 8080 (stress application)
-Create an internet-facing Application Load Balancer (ALB):
-	• Place it in both public subnets
-	• Attach the ALB Security Group
-	• Configure listeners for ports 80 and 8080
-	• Forward traffic to the respective target groups
-Attach both target groups to the Auto Scaling Group.
-New EC2 instances launched by the ASG are automatically registered.
+---
 
-Phase 7: Route 53 and Testing
-Use Route 53 to map a custom domain name to the ALB DNS name:
-http://my-project-alb-xxxx.ap-south-1.elb.amazonaws.com
-Access patterns:
-	• domain_name:80 → Customer-facing application
-	• domain_name:8080 → Internal stress testing
-To test auto scaling, generate load manually:
-sudo yum install epel-release -y
-sudo yum install stress -y
-stress --cpu 10
-As CPU utilization increases, the Auto Scaling Group launches new instances automatically.
+## Phase 4: Base EC2 Instance Preparation and AMI Creation
 
-Final Execution Flow
-Phase 1 → VPC & Networking
-Phase 2 → Security Groups
-Phase 3 → EFS
-Phase 4 → Base EC2 & AMI
-Phase 5 → Launch Template & ASG
-Phase 6 → ALB & Target Groups
-Phase 7 → Route 53 & Load Testing
+A **temporary EC2 instance** is launched manually to prepare the base image (golden AMI).
+This instance is used only for initial configuration and is terminated after the AMI is created.
 
-Final Architecture Flow
-Route 53 → ALB (Public Subnets) → Target Groups → ASG (Private Subnets) → EC2 → EFS
+### EC2 Launch Configuration (Temporary Instance)
+
+- Launch the instance in a **public subnet**.
+- Assign a **public IP address** to allow SSH access.
+- Attach the **EC2 Security Group**.
+- Allow SSH (port 22) **only from your own IP address**.
+- This instance is **not part of Auto Scaling**.
+
+> This approach allows secure administrative access while keeping Auto Scaling instances private.
+
+---
+
+### Application Setup and Amazon EFS Mounting (Inside EC2 Instance)
+
+Connect to the temporary EC2 instance using SSH. All the following steps are performed **inside the instance**.
+
+---
+
+#### Step 1: Update OS and Install Apache HTTP Server
+
+	Update the operating system and install Apache, which will serve the web application.
+	
+	```bash
+	sudo yum update -y
+	sudo yum install httpd -y
+	sudo systemctl enable httpd
+	sudo systemctl start httpd
+	sudo systemctl status httpd
+
+#### Step 2: Install Amazon EFS Utilities
+
+	Install the required Amazon EFS utilities to enable secure mounting of EFS using the NFS protocol.
+	
+	```bash
+	sudo yum install -y amazon-efs-utils
+
+#### Step 3: Verify or Create the Apache Web Root Directory
+	Ensure that the Apache document root directory exists before mounting EFS.
+
+sudo mkdir -p /var/www/html
+
+#### Step 4: Mount Amazon EFS to the Web Root Directory
+	Mount the Amazon EFS file system to /var/www/html so that application content is shared across all EC2 instances.
+	
+	sudo mount -t efs -o tls fs-xxxx:/ /var/www/html
+	
+	Replace fs-xxxx with your actual EFS File System ID.
+	
+	Verify that the file system is mounted successfully:
+	
+	df -h | grep efs
+
+#### Step 5: Set Correct Permissions for Apache
+
+	Update ownership and permissions so Apache can read and write to the EFS-mounted directory.
+	
+	sudo chown -R apache:apache /var/www/html
+	sudo chmod -R 755 /var/www/html
+	
+	
+	(Optional) Create a test file to confirm EFS is working:
+	
+	echo "EFS mount successful" | sudo tee /var/www/html/index.html  
+
+
+#### Step 6: Make the EFS Mount Persistent Across Reboots
+
+	Add the EFS mount entry to /etc/fstab so it mounts automatically after reboot and on Auto Scaling instances.
+	
+	sudo vi /etc/fstab
+	
+	Add the following line:
+	
+	fs-xxxx.efs.ap-south-1.amazonaws.com:/ /var/www/html efs defaults,_netdev 0 0
+
+#### Step 7: Reboot and Validate Persistence
+
+	Reboot the instance to validate that Apache and EFS start automatically.
+	sudo reboot
+	
+	After reconnecting, verify:
+	systemctl status httpd
+	df -h | grep efs
+
+#### Step 8: Proceed to AMI Creation
+
+	After verifying that Apache is running and Amazon EFS is mounted persistently, create an AMI from the temporary EC2 instance using the EC2 Console → Actions → Image and templates → Create image. AWS briefly 				stops the instance and creates EBS snapshots to capture the OS, Apache configuration, and EFS mount settings. Once the AMI status becomes Available, terminate the temporary EC2 instance. This AMI is then used in the 	Launch Template so all Auto Scaling instances start with Apache installed and EFS mounted automatically.
+---
+
+## 🔹 Phase 5: Launch Template and Auto Scaling Group
+
+Create a **Launch Template** that defines how EC2 instances are launched by Auto Scaling.
+
+### Launch Template Configuration
+- Select the **custom AMI** created in Phase 4.
+- Attach the **EC2 Security Group**.
+- Choose the required instance type.
+- Add **user data** (stress script if required).
+
+### Application Ports
+- **Port 80** → Main application.
+- **Port 8080** → Stress / load testing application.
+
+### Auto Scaling Group Creation
+- Create an **Auto Scaling Group (ASG)** using the Launch Template.
+- Select **only private subnets**.
+- Do **not** assign public IP addresses.
+- Configure:
+  - Desired capacity
+  - Minimum capacity
+  - Maximum capacity
+- Add **CPU-based dynamic scaling policies**.
+
+At this stage, EC2 instances are automatically launched and managed by ASG.
+
+---
+
+## 🔹 Phase 6: Application Load Balancer and Target Groups
+
+### Target Groups
+Create target groups **before** creating the Load Balancer.
+
+- Target Group 1:
+  - Protocol: HTTP
+  - Port: **80**
+  - Purpose: Main application
+- Target Group 2:
+  - Protocol: HTTP
+  - Port: **8080**
+  - Purpose: Stress testing
+
+### Application Load Balancer (ALB)
+Create an **internet-facing Application Load Balancer**.
+
+- Place the ALB in **both public subnets**.
+- Attach the **ALB Security Group**.
+- Configure listeners:
+  - Port **80** → Forward to Target Group (80)
+  - Port **8080** → Forward to Target Group (8080)
+
+### ASG Integration
+- Attach both target groups to the Auto Scaling Group.
+- EC2 instances launched by ASG are automatically registered.
+- Health checks are managed through the ALB.
+
+---
+
+## 🔹 Phase 7: Route 53 and Load Testing
+### Route 53 Configuration
+Use **Amazon Route 53** to map a custom domain to the ALB DNS name.
