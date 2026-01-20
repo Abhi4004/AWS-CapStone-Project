@@ -1,0 +1,50 @@
+
+Resilient and Scalable Web Application Deployment on AWS
+Architecture Explanation & Implementation Flow
+
+Step 1: Designing the Network (VPC)
+The architecture starts by creating a dedicated Virtual Private Cloud (VPC) to provide network isolation for the application. The VPC is created with the CIDR block 192.168.0.0/24, which is sufficient to divide the network into public and private subnets across multiple Availability Zones.
+An Internet Gateway (IGW) is created and attached to the VPC. This gateway enables communication between resources inside the VPC and the public internet. Without attaching the IGW, no resource inside the VPC can be accessed from or reach the internet.
+To ensure high availability, two Availability Zones are selected: ap-south-1A and ap-south-1B. Using multiple AZs ensures that the application continues to run even if one AZ becomes unavailable.
+
+Step 2: Subnet Design and Routing
+The VPC is divided into four subnets: two public and two private. The public subnets are created in each Availability Zone with CIDR ranges 192.168.0.0/26 and 192.168.0.64/26. These subnets are associated with a public route table that contains a route to the Internet Gateway (0.0.0.0/0 → IGW). This makes them public and suitable for internet-facing resources.
+The private subnets are created with CIDR ranges 192.168.0.128/26 and 192.168.0.192/26, one in each Availability Zone. These subnets do not have direct access to the Internet Gateway, making them private and secure for backend resources such as EC2 instances and EFS.
+Since EC2 instances in private subnets still need outbound internet access for software updates and package installation, a NAT Gateway is created in one of the public subnets and assigned an Elastic IP. A private route table is then created with a default route pointing to the NAT Gateway. This allows instances in private subnets to access the internet only for outbound traffic, while blocking all inbound internet connections.
+
+Step 3: Load Balancer Placement
+An Application Load Balancer (ALB) is created and placed in both public subnets. Because it is internet-facing, it must reside in public subnets. The ALB acts as the single entry point for all incoming application traffic and distributes requests across EC2 instances running in private subnets.
+Two listeners are configured on the ALB. Port 80 is used for the main customer-facing application, while port 8080 is used for an internal stress-testing application. Each listener forwards traffic to its respective target group.
+
+Step 4: Target Groups and Traffic Routing
+Two target groups are created before integrating the ALB with Auto Scaling. The first target group listens on port 80 and forwards traffic to EC2 instances hosting the main web application. The second target group listens on port 8080 and is used for generating load to test auto scaling behaviour.
+Target groups act as the connection layer between the ALB and the Auto Scaling Group. When new EC2 instances are launched by the ASG, they are automatically registered with these target groups.
+
+Step 5: Auto Scaling Group and Launch Template
+An Auto Scaling Group (ASG) is configured to manage EC2 instances across both private subnets. The ASG uses a Launch Template, which defines the AMI, instance type, security group, and user data configuration.
+Every time the ASG launches a new instance, it creates a fresh EC2 instance based on the Launch Template. No data is copied from existing instances, which makes the instances stateless. Scaling policies are configured so that instances are automatically added or removed based on CPU utilization.
+The EC2 instances launched by the ASG do not receive public IP addresses. All incoming traffic reaches them only through the ALB, ensuring better security.
+
+Step 6: AMI Preparation
+Before creating the Launch Template, a base EC2 instance is configured with required software such as Apache HTTP server. Once the instance is properly configured and tested, an Amazon Machine Image (AMI) is created. During AMI creation, the instance shuts down temporarily. The AMI captures the operating system, installed packages, and configurations using EBS snapshots.
+This AMI ensures that all instances launched by the ASG are consistent.
+
+Step 7: Shared Storage with Amazon EFS
+Since ASG instances are stateless and frequently replaced, Amazon Elastic File System (EFS) is used to store shared application data. EFS is created as a regional file system, making it accessible from both Availability Zones.
+EFS is mounted to the EC2 instances using the NFS protocol over port 2049. The file system is mounted to /var/www/html, ensuring that application content remains consistent across all instances. The EFS mount is also added to /etc/fstab so that it automatically mounts whenever a new instance boots.
+This approach ensures data persistence even when EC2 instances are terminated and recreated.
+
+Step 8: Security Group Design
+Security groups are carefully designed to enforce least-privilege access. The ALB security group allows inbound traffic on port 80 from the internet and restricts port 8080 to internal or admin IPs. The EC2 security group allows inbound traffic only from the ALB security group on ports 80 and 8080. The EFS security group allows inbound traffic on port 2049 only from the EC2 security group.
+This layered security ensures that backend resources are never exposed directly to the internet.
+
+Step 9: Load Testing and Auto Scaling Validation
+To validate auto scaling behaviour, a stress application is run on port 8080. The stress tool is installed on EC2 instances and used to generate high CPU usage. As CPU utilization increases, the ASG automatically launches new instances. When the load decreases, excess instances are terminated.
+This confirms that the architecture can dynamically scale based on demand.
+
+Step 10: Route 53 Integration
+Finally, Amazon Route 53 is used for DNS management. A custom domain is mapped to the ALB DNS name. End users access the application using the domain name on port 80, while internal testing is performed using port 8080.
+Route 53 provides reliable and scalable DNS routing to the ALB, completing the end-to-end architecture.
+
+Final Architecture Summary
+This architecture ensures high availability, scalability, security, and resilience by combining public and private subnet isolation, load balancing, auto scaling, and shared storage. The system can handle traffic spikes automatically, recover from instance failures, and maintain consistent application data across multiple EC2 instances.
